@@ -351,7 +351,8 @@ async function getWorker(){
   if(worker) return worker;
   statusText.textContent = 'OCRエンジンを準備中…(初回のみ)';
   worker = await Tesseract.createWorker('eng', 1, {
-    langPath: './tessdata',      // 同梱した eng.traineddata.gz を参照
+    langPath: './tessdata',      // 同梱した eng.traineddata(非圧縮)を参照
+    gzip: false,                 // .gz版ではなく非圧縮ファイルを使うための指定
     workerPath: './tesseract/worker.min.js',
     corePath: './tesseract/tesseract-core-simd.wasm.js',
     logger: m => {
