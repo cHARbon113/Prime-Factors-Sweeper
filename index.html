@@ -148,6 +148,7 @@
   tbody tr.mismatch{background:rgba(255,107,107,0.08);}
   tbody tr.mismatch:hover{background:rgba(255,107,107,0.14);}
   td.num{color:var(--text);font-weight:600;}
+  td.num .num-bad{color:#ff6b6b;margin-left:4px;cursor:help;}
   td.pt{color:var(--accent);text-align:right;}
   td.factors{color:var(--muted);}
   td.calc{text-align:right;}
@@ -158,6 +159,32 @@
   td.chk-col input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
   tbody tr.checked td{opacity:.5;}
   tbody tr.checked td.num{text-decoration:line-through;}
+  tbody tr.edited{box-shadow:inset 3px 0 0 var(--accent);}
+  td.num .edited-mark{color:var(--accent);font-size:10px;margin-left:4px;}
+
+  th.op-col, td.op-col{width:1%;white-space:nowrap;text-align:right;}
+  button.edit-btn, button.save-btn, button.cancel-btn{
+    font-family:var(--mono);font-size:11px;
+    background:none;border:1px solid var(--border);
+    color:var(--muted);border-radius:6px;
+    padding:4px 8px;cursor:pointer;
+  }
+  button.edit-btn:hover{color:var(--text);border-color:var(--muted);}
+  button.save-btn{color:var(--ok);border-color:var(--ok);margin-right:4px;}
+  button.save-btn:hover{background:rgba(95,212,168,0.1);}
+  button.cancel-btn:hover{color:var(--text);border-color:var(--muted);}
+
+  tr.editing td{background:var(--panel-hover);}
+  tr.editing input[type="text"]{
+    font-family:var(--mono);font-size:13px;
+    background:var(--bg);border:1px solid var(--accent);
+    color:var(--text);border-radius:6px;
+    padding:5px 7px;
+  }
+  tr.editing .edit-num{width:60px;}
+  tr.editing .edit-factors{width:150px;}
+  tr.editing .edit-points{width:55px;}
+  .calc-pending{color:var(--muted);font-style:italic;font-size:11px;}
 
   .filter-bar{
     display:flex;gap:8px;flex-wrap:wrap;
@@ -310,7 +337,8 @@
       11〜19 → 9pt / 23〜47 → 12pt / 53〜97 → 15pt<br>
       101〜163 → 18pt / 167〜251 → 21pt / 257〜367 → 24pt / 373〜499 → 27pt<br>
       ボーナス: 2桁の素因数が2つ以上含まれる → 合計×1.5(小数点以下切り捨て)<br>
-      ※500以上の素因数は対応表に無いため「範囲外」と表示されます
+      ※500以上の素因数は対応表に無いため「範囲外」と表示されます<br>
+      ※数字の横の⚠は「素因数の積が数字と一致しない」ことを示します(得点とは別の検算です)
     </div>
 
     <div class="filter-bar">
@@ -318,13 +346,13 @@
       <input type="text" class="pt-range" id="filterPointsMin" placeholder="得点 最小">
       <span class="range-sep">〜</span>
       <input type="text" class="pt-range" id="filterPointsMax" placeholder="最大">
-      <label class="chk"><input type="checkbox" id="filterMismatch"> 検算が不一致のみ表示</label>
+      <label class="chk"><input type="checkbox" id="filterMismatch"> 検算不一致のみ表示(得点・数値どちらも)</label>
       <button class="filter-clear" id="filterClear">フィルター解除</button>
     </div>
 
     <table id="table">
       <thead>
-        <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th></tr>
+        <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th><th class="op-col"></th></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -343,7 +371,8 @@
   </div>
 
   <div class="footer-note">
-    処理はすべて端末内で完結します(Tesseract.js / WebAssembly)。画像はどこにも送信されません。
+    処理はすべて端末内で完結します(Tesseract.js / WebAssembly)。画像はどこにも送信されません。<br>
+    読み取り結果はこのブラウザ内(localStorage)に自動保存され、リロードしても復元されます。※画像のサムネイルは保存されません。「すべてクリア」で保存データも消去されます。
   </div>
 </div>
 
@@ -401,6 +430,7 @@ const filterClear = document.getElementById('filterClear');
 let parsedRows = [];       // ページを再読み込みするまで、複数回のスキャン結果をここに蓄積し続ける
 let checkedIds = new Set();
 let allRawText = '';
+let editingId = null;      // 現在インライン編集中の行のid(nullなら編集中なし)
 let filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
 
 // ── 得点表(スクリーンショットの「参考データ」に基づく) ──
@@ -438,6 +468,49 @@ function computeScore(factors){
   const bonusApplied = twoDigitCount >= 2;
   if(bonusApplied) sum = Math.floor(sum * 1.5);
   return { score: sum, bonusApplied, hasUnknown };
+}
+
+// 素因数を全部掛け合わせて、元の数字と一致するかを確認する
+// (得点だけでなく数字自体をOCRが誤読していないかをチェックするための検算)
+function computeProduct(factors){
+  return factors.reduce((acc, f) => acc * parseInt(f, 10), 1);
+}
+
+// ── リロード・再訪問時のデータ保持(localStorage) ──
+// 画像そのものは保存できない(blob URLは一時的なため)。
+// 読み取り済みの表データ・チェック状態・手動編集内容だけを保存・復元する。
+const STORAGE_KEY = 'factorizationOcrTool.v1';
+
+function persistState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      parsedRows,
+      checkedIds: Array.from(checkedIds),
+      allRawText
+    }));
+  }catch(e){
+    console.warn('localStorageへの保存に失敗しました(容量制限などの可能性)', e);
+  }
+}
+
+function restoreState(){
+  let saved;
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return;
+    saved = JSON.parse(raw);
+  }catch(e){
+    console.warn('保存データの読み込みに失敗しました', e);
+    return;
+  }
+  if(!saved || !Array.isArray(saved.parsedRows) || saved.parsedRows.length === 0) return;
+
+  parsedRows = saved.parsedRows;
+  checkedIds = new Set(saved.checkedIds || []);
+  allRawText = saved.allRawText || '';
+  rawBox.textContent = allRawText;
+  renderTable();
+  results.classList.add('show');
 }
 
 ['dragover','dragenter'].forEach(evt=>{
@@ -495,6 +568,7 @@ async function handleFiles(fileList){
   statusEl.classList.remove('show');
   renderTable();
   results.classList.add('show');
+  persistState();
 }
 
 // 今回読み取りたいのは「数字・× ・=・pt」のみ。
@@ -546,7 +620,8 @@ function parseRows(rawText){
     const factors = factorsRaw.split(/[×xX*]/).map(s=>s.trim()).filter(Boolean);
     const { score, bonusApplied, hasUnknown } = computeScore(factors);
     const mismatch = !hasUnknown && score !== parseInt(points, 10);
-    rows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, mismatch });
+    const numberMismatch = computeProduct(factors) !== parseInt(number, 10);
+    rows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, mismatch, numberMismatch });
   }
   return rows;
 }
@@ -574,7 +649,7 @@ function passesFilters(row){
   const pt = parseInt(row.points, 10);
   if(filters.pointsMin !== null && pt < filters.pointsMin) return false;
   if(filters.pointsMax !== null && pt > filters.pointsMax) return false;
-  if(filters.mismatchOnly && !row.mismatch) return false;
+  if(filters.mismatchOnly && !row.mismatch && !row.numberMismatch) return false;
   return true;
 }
 
@@ -587,8 +662,27 @@ function renderTable(){
     emptyNote.style.display = 'none';
     visible.forEach(row=>{
       const tr = document.createElement('tr');
-      if(row.mismatch) tr.classList.add('mismatch');
+      if(row.mismatch || row.numberMismatch) tr.classList.add('mismatch');
+      if(row.edited) tr.classList.add('edited');
       if(checkedIds.has(row.id)) tr.classList.add('checked');
+
+      if(row.id === editingId){
+        tr.classList.add('editing');
+        tr.innerHTML = `
+          <td class="chk-col"></td>
+          <td class="num"><input type="text" class="edit-num" value="${row.number}"></td>
+          <td class="factors"><input type="text" class="edit-factors" value="${row.factors.join('×')}"></td>
+          <td class="pt"><input type="text" class="edit-points" value="${row.points}"></td>
+          <td class="calc-pending">保存後に再計算</td>
+          <td class="op-col">
+            <button class="save-btn" data-id="${row.id}">保存</button>
+            <button class="cancel-btn" data-id="${row.id}">キャンセル</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+        return;
+      }
+
       let calcCell;
       if(row.hasUnknown){
         calcCell = `<td class="calc unknown">範囲外</td>`;
@@ -599,10 +693,11 @@ function renderTable(){
       }
       tr.innerHTML = `
         <td class="chk-col"><input type="checkbox" class="row-chk" data-id="${row.id}" ${checkedIds.has(row.id) ? 'checked' : ''}></td>
-        <td class="num">${row.number}</td>
+        <td class="num">${row.number}${row.numberMismatch ? `<span class="num-bad" title="素因数の積(${computeProduct(row.factors)})が数字と一致しません">⚠</span>` : ''}${row.edited ? '<span class="edited-mark">✎</span>' : ''}</td>
         <td class="factors">${row.factors.join(' × ')}</td>
         <td class="pt">${row.points}pt</td>
         ${calcCell}
+        <td class="op-col"><button class="edit-btn" data-id="${row.id}">編集</button></td>
       `;
       tbody.appendChild(tr);
     });
@@ -612,13 +707,76 @@ function renderTable(){
     : `${visible.length}件 / 全${parsedRows.length}件`;
 }
 
-// チェックボックスはtbodyへのイベント委譲で処理(再描画のたびに個別登録しない)
+// チェックボックスの状態はchangeイベントで検知(クリックイベントとは別に登録)
 tbody.addEventListener('change', e=>{
   if(!e.target.classList.contains('row-chk')) return;
   const id = Number(e.target.dataset.id);
   if(e.target.checked) checkedIds.add(id); else checkedIds.delete(id);
   e.target.closest('tr').classList.toggle('checked', e.target.checked);
+  persistState();
 });
+
+// 編集/保存/キャンセルボタンは、すべてtbodyへのイベント委譲で処理する
+// (renderTableのたびにDOMが作り直されるため、個別にリスナーを付け直さなくて済む)
+tbody.addEventListener('click', e=>{
+  const editBtn = e.target.closest('.edit-btn');
+  if(editBtn){
+    editingId = Number(editBtn.dataset.id);
+    renderTable();
+    return;
+  }
+  const cancelBtn = e.target.closest('.cancel-btn');
+  if(cancelBtn){
+    editingId = null;
+    renderTable();
+    return;
+  }
+  const saveBtn = e.target.closest('.save-btn');
+  if(saveBtn){
+    const id = Number(saveBtn.dataset.id);
+    const tr = saveBtn.closest('tr');
+    const numVal = tr.querySelector('.edit-num').value.trim();
+    const factorsVal = tr.querySelector('.edit-factors').value.trim();
+    const pointsVal = tr.querySelector('.edit-points').value.trim();
+    applyEdit(id, numVal, factorsVal, pointsVal);
+  }
+});
+
+// 編集内容を検証してparsedRowsに反映し、検算をやり直す
+function applyEdit(id, numVal, factorsVal, pointsVal){
+  if(!numVal || !factorsVal || !pointsVal){
+    alert('すべての項目を入力してください。');
+    return;
+  }
+  if(!/^\d+$/.test(numVal) || !/^\d+$/.test(pointsVal)){
+    alert('数字・得点は半角数字で入力してください。');
+    return;
+  }
+  // 素因数は × x , スペース のどれで区切っても受け付ける
+  const factors = factorsVal.split(/[×xX*,\s]+/).map(s=>s.trim()).filter(Boolean);
+  if(factors.length === 0 || factors.some(f => !/^\d+$/.test(f))){
+    alert('素因数分解は数字と×(またはスペース)で入力してください。例: 2×11×11');
+    return;
+  }
+
+  const row = parsedRows.find(r => r.id === id);
+  if(!row) return;
+
+  const { score, bonusApplied, hasUnknown } = computeScore(factors);
+  row.number = numVal;
+  row.factors = factors;
+  row.points = pointsVal;
+  row.computed = score;
+  row.bonusApplied = bonusApplied;
+  row.hasUnknown = hasUnknown;
+  row.mismatch = !hasUnknown && score !== parseInt(pointsVal, 10);
+  row.numberMismatch = computeProduct(factors) !== parseInt(numVal, 10);
+  row.edited = true;
+
+  editingId = null;
+  renderTable();
+  persistState();
+}
 
 rawToggle.addEventListener('click', ()=>{
   const showing = rawBox.classList.toggle('show');
@@ -660,12 +818,14 @@ filterClear.addEventListener('click', ()=>{
 dlCsv.addEventListener('click', ()=>{
   if(parsedRows.length === 0) return;
   const visible = parsedRows.filter(passesFilters);
-  let csv = '数字,素因数分解,得点(OCR),検算,判定,チェック\n';
+  let csv = '数字,素因数分解,得点(OCR),検算,判定,数値検算,チェック,手動編集\n';
   visible.forEach(r=>{
     const calc = r.hasUnknown ? '範囲外' : r.computed;
     const verdict = r.hasUnknown ? '-' : (r.mismatch ? '不一致' : '一致');
+    const numVerdict = r.numberMismatch ? '不一致' : '一致';
     const checked = checkedIds.has(r.id) ? '済' : '未';
-    csv += `${r.number},"${r.factors.join('×')}",${r.points},${calc},${verdict},${checked}\n`;
+    const edited = r.edited ? '済' : '未';
+    csv += `${r.number},"${r.factors.join('×')}",${r.points},${calc},${verdict},${numVerdict},${checked},${edited}\n`;
   });
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -681,6 +841,7 @@ resetBtn.addEventListener('click', ()=>{
   parsedRows = [];
   checkedIds = new Set();
   allRawText = '';
+  editingId = null;
   fileInput.value = '';
   previewStrip.innerHTML = '';
   previewStrip.classList.remove('show');
@@ -695,7 +856,11 @@ resetBtn.addEventListener('click', ()=>{
   filterPointsMin.value = '';
   filterPointsMax.value = '';
   filterMismatch.checked = false;
+  localStorage.removeItem(STORAGE_KEY);
 });
+
+// ページを開いた時点で、前回までの保存データがあれば復元する
+restoreState();
 </script>
 </body>
 </html>
