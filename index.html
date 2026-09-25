@@ -64,14 +64,22 @@
   .dz-text{font-size:14px;color:var(--text);margin-bottom:4px;}
   .dz-sub{font-size:12px;color:var(--muted);font-family:var(--mono);}
 
-  .preview{
-    margin-top:16px;
-    border-radius:10px;
-    overflow:hidden;
-    border:1px solid var(--border);
-    max-height:220px;
+  .preview-strip{
+    display:none;gap:8px;overflow-x:auto;
+    margin-top:16px;padding-bottom:4px;
   }
-  .preview img{width:100%;display:block;object-fit:cover;max-height:220px;}
+  .preview-strip.show{display:flex;}
+  .preview-strip .thumb{flex:0 0 auto;width:72px;text-align:center;}
+  .preview-strip .thumb img{
+    width:72px;height:72px;object-fit:cover;
+    border-radius:8px;border:1px solid var(--border);
+  }
+  .preview-strip .thumb.pending img{opacity:.4;}
+  .preview-strip .thumb span{
+    display:block;font-size:9px;color:var(--muted);
+    margin-top:4px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:72px;
+  }
 
   .status{
     margin-top:16px;
@@ -137,9 +145,65 @@
   }
   tbody tr:last-child td{border-bottom:none;}
   tbody tr:hover{background:var(--panel-hover);}
+  tbody tr.mismatch{background:rgba(255,107,107,0.08);}
+  tbody tr.mismatch:hover{background:rgba(255,107,107,0.14);}
   td.num{color:var(--text);font-weight:600;}
   td.pt{color:var(--accent);text-align:right;}
   td.factors{color:var(--muted);}
+  td.calc{text-align:right;}
+  td.calc.ok{color:var(--ok);}
+  td.calc.bad{color:#ff6b6b;font-weight:700;}
+  td.calc.unknown{color:var(--muted);font-style:italic;}
+  th.chk-col, td.chk-col{width:32px;padding-left:14px;padding-right:0;}
+  td.chk-col input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
+  tbody tr.checked td{opacity:.5;}
+  tbody tr.checked td.num{text-decoration:line-through;}
+
+  .filter-bar{
+    display:flex;gap:8px;flex-wrap:wrap;
+    align-items:center;
+    margin-bottom:12px;
+  }
+  .filter-bar input[type="text"]{
+    font-family:var(--mono);
+    font-size:12.5px;
+    background:var(--panel);
+    border:1px solid var(--border);
+    color:var(--text);
+    padding:8px 10px;
+    border-radius:8px;
+    width:160px;
+  }
+  .filter-bar input.pt-range{width:70px;}
+  .filter-bar .range-sep{color:var(--muted);font-family:var(--mono);font-size:12px;}
+  .filter-bar input[type="text"]::placeholder{color:var(--muted);}
+  .filter-bar input[type="text"]:focus{outline:none;border-color:var(--accent);}
+  .filter-bar .chk{
+    display:flex;align-items:center;gap:6px;
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    cursor:pointer;
+  }
+  .filter-bar .chk input{cursor:pointer;}
+  .filter-clear{
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    background:none;border:1px solid var(--border);
+    border-radius:8px;padding:8px 10px;cursor:pointer;
+  }
+  .filter-clear:hover{color:var(--text);border-color:var(--muted);}
+
+  .score-note{
+    margin-bottom:12px;font-size:11.5px;color:var(--muted);
+    cursor:pointer;font-family:var(--mono);user-select:none;
+  }
+  .score-note:hover{color:var(--text);}
+  .score-table{
+    display:none;margin:8px 0 14px;
+    background:var(--panel);border:1px solid var(--border);
+    border-radius:8px;padding:10px 14px;
+    font-family:var(--mono);font-size:11px;color:var(--muted);
+    line-height:1.9;
+  }
+  .score-table.show{display:block;}
 
   .raw-toggle{
     margin-top:18px;
@@ -220,15 +284,13 @@
   </header>
 
   <div class="dropzone" id="dropzone">
-    <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="fileInput" accept="image/*" multiple>
     <div class="dz-icon">📄</div>
-    <div class="dz-text">画像をドラッグ&ドロップ、またはクリックして選択</div>
+    <div class="dz-text">画像をドラッグ&ドロップ、またはクリックして選択(複数選択OK・追加も可)</div>
     <div class="dz-sub">PNG / JPG</div>
   </div>
 
-  <div class="preview" id="preview" style="display:none;">
-    <img id="previewImg">
-  </div>
+  <div class="preview-strip" id="previewStrip"></div>
 
   <div class="status" id="status">
     <div class="spinner"></div>
@@ -241,9 +303,28 @@
       <h2>読み取り結果</h2>
       <span class="count" id="count">0件</span>
     </div>
+
+    <div class="score-note" id="scoreNote">▸ 検算に使っている得点表を表示</div>
+    <div class="score-table" id="scoreTable">
+      2 → 3pt / 5 → 4pt / 3 → 5pt / 7 → 6pt<br>
+      11〜19 → 9pt / 23〜47 → 12pt / 53〜97 → 15pt<br>
+      101〜163 → 18pt / 167〜251 → 21pt / 257〜367 → 24pt / 373〜499 → 27pt<br>
+      ボーナス: 2桁の素因数が2つ以上含まれる → 合計×1.5(小数点以下切り捨て)<br>
+      ※500以上の素因数は対応表に無いため「範囲外」と表示されます
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="filterFactor" placeholder="素因数AND検索 (例: 11 29)">
+      <input type="text" class="pt-range" id="filterPointsMin" placeholder="得点 最小">
+      <span class="range-sep">〜</span>
+      <input type="text" class="pt-range" id="filterPointsMax" placeholder="最大">
+      <label class="chk"><input type="checkbox" id="filterMismatch"> 検算が不一致のみ表示</label>
+      <button class="filter-clear" id="filterClear">フィルター解除</button>
+    </div>
+
     <table id="table">
       <thead>
-        <tr><th>数字</th><th>素因数分解</th><th>得点</th></tr>
+        <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -254,7 +335,7 @@
 
     <div class="actions">
       <button class="dl" id="dlCsv">CSVをダウンロード</button>
-      <button class="reset" id="resetBtn">別の画像を読み込む</button>
+      <button class="reset" id="resetBtn">すべてクリア</button>
     </div>
 
     <div class="raw-toggle" id="rawToggle">▸ 認識テキストを表示(デバッグ用)</div>
@@ -297,8 +378,7 @@
 <script>
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
-const preview = document.getElementById('preview');
-const previewImg = document.getElementById('previewImg');
+const previewStrip = document.getElementById('previewStrip');
 const statusEl = document.getElementById('status');
 const statusText = document.getElementById('statusText');
 const barFill = document.getElementById('barFill');
@@ -310,8 +390,55 @@ const rawToggle = document.getElementById('rawToggle');
 const rawBox = document.getElementById('rawBox');
 const dlCsv = document.getElementById('dlCsv');
 const resetBtn = document.getElementById('resetBtn');
+const scoreNote = document.getElementById('scoreNote');
+const scoreTable = document.getElementById('scoreTable');
+const filterFactor = document.getElementById('filterFactor');
+const filterPointsMin = document.getElementById('filterPointsMin');
+const filterPointsMax = document.getElementById('filterPointsMax');
+const filterMismatch = document.getElementById('filterMismatch');
+const filterClear = document.getElementById('filterClear');
 
-let parsedRows = [];
+let parsedRows = [];       // ページを再読み込みするまで、複数回のスキャン結果をここに蓄積し続ける
+let checkedIds = new Set();
+let allRawText = '';
+let filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+
+// ── 得点表(スクリーンショットの「参考データ」に基づく) ──
+const POINT_RULES = [
+  { min: 2,   max: 2,   pt: 3  },
+  { min: 3,   max: 3,   pt: 5  },
+  { min: 5,   max: 5,   pt: 4  },
+  { min: 7,   max: 7,   pt: 6  },
+  { min: 11,  max: 19,  pt: 9  },
+  { min: 23,  max: 47,  pt: 12 },
+  { min: 53,  max: 97,  pt: 15 },
+  { min: 101, max: 163, pt: 18 },
+  { min: 167, max: 251, pt: 21 },
+  { min: 257, max: 367, pt: 24 },
+  { min: 373, max: 499, pt: 27 },
+];
+
+function pointForFactor(n){
+  const rule = POINT_RULES.find(r => n >= r.min && n <= r.max);
+  return rule ? rule.pt : null; // null = 対応表の範囲外(500以上など)
+}
+
+// 素因数リストから得点を検算する。
+// ボーナス条件:「2桁の素因数が2つ含まれる」→ 同じ数の重複も1個ずつ数える(例: 11×11は2個)
+function computeScore(factors){
+  const nums = factors.map(f => parseInt(f, 10));
+  let sum = 0;
+  let hasUnknown = false;
+  nums.forEach(n=>{
+    const pt = pointForFactor(n);
+    if(pt === null) hasUnknown = true;
+    else sum += pt;
+  });
+  const twoDigitCount = nums.filter(n => n >= 10 && n <= 99).length;
+  const bonusApplied = twoDigitCount >= 2;
+  if(bonusApplied) sum = Math.floor(sum * 1.5);
+  return { score: sum, bonusApplied, hasUnknown };
+}
 
 ['dragover','dragenter'].forEach(evt=>{
   dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.add('drag');});
@@ -320,20 +447,54 @@ let parsedRows = [];
   dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.remove('drag');});
 });
 dropzone.addEventListener('drop', e=>{
-  const f = e.dataTransfer.files[0];
-  if(f) handleFile(f);
+  handleFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener('change', e=>{
-  const f = e.target.files[0];
-  if(f) handleFile(f);
+  handleFiles(e.target.files);
+  fileInput.value = ''; // 同じファイルを続けて選び直せるようにする
 });
 
-function handleFile(file){
+function addThumb(file){
   const url = URL.createObjectURL(file);
-  previewImg.src = url;
-  preview.style.display = 'block';
-  results.classList.remove('show');
-  runOcr(file);
+  const div = document.createElement('div');
+  div.className = 'thumb pending';
+  div.innerHTML = `<img src="${url}" alt=""><span>${file.name}</span>`;
+  previewStrip.appendChild(div);
+  previewStrip.classList.add('show');
+  return div;
+}
+
+// 複数枚を順番にOCRする。前回までの結果(parsedRows)は消さずに追加していく。
+async function handleFiles(fileList){
+  const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+  if(files.length === 0) return;
+
+  const thumbs = files.map(addThumb);
+  statusEl.classList.add('show');
+
+  for(let i=0; i<files.length; i++){
+    const prefix = files.length > 1 ? `(${i+1}/${files.length}) ` : '';
+    statusText.textContent = prefix + '準備中…';
+    barFill.style.width = '0%';
+    progressPrefix = prefix;
+    try{
+      const w = await getWorker();
+      const { data } = await w.recognize(files[i]);
+      allRawText += (allRawText ? '\n\n--- 次の画像 ---\n\n' : '') + data.text;
+      rawBox.textContent = allRawText;
+      addRows(parseRows(data.text));
+      thumbs[i].classList.remove('pending');
+    }catch(err){
+      console.error(err);
+      thumbs[i].classList.remove('pending');
+      thumbs[i].style.outline = '1px solid #ff6b6b';
+      alert(`${i+1}枚目(${files[i].name})の読み取りに失敗しました。tesseract/とtessdata/フォルダの配置を確認してください。`);
+    }
+  }
+
+  statusEl.classList.remove('show');
+  renderTable();
+  results.classList.add('show');
 }
 
 // 今回読み取りたいのは「数字・× ・=・pt」のみ。
@@ -346,6 +507,7 @@ function handleFile(file){
 const CHAR_WHITELIST = '0123456789×x=pt ';
 
 let worker = null;
+let progressPrefix = ''; // 「(2/5) 」のように複数枚処理中の進捗を表示するためのプレフィックス
 
 async function getWorker(){
   if(worker) return worker;
@@ -356,10 +518,10 @@ async function getWorker(){
     corePath: './tesseract/tesseract-core-simd.wasm.js',
     logger: m => {
       if(m.status === 'recognizing text'){
-        statusText.textContent = `読み取り中… ${Math.round(m.progress*100)}%`;
+        statusText.textContent = `${progressPrefix}読み取り中… ${Math.round(m.progress*100)}%`;
         barFill.style.width = (m.progress*100) + '%';
       } else if(m.status){
-        statusText.textContent = m.status;
+        statusText.textContent = progressPrefix + m.status;
       }
     }
   });
@@ -369,70 +531,141 @@ async function getWorker(){
   return worker;
 }
 
-async function runOcr(file){
-  statusEl.classList.add('show');
-  statusText.textContent = '準備中…';
-  barFill.style.width = '0%';
-
-  try{
-    const w = await getWorker();
-    const { data } = await w.recognize(file);
-    statusEl.classList.remove('show');
-    parseAndRender(data.text);
-  }catch(err){
-    statusEl.classList.remove('show');
-    statusText.textContent = 'エラーが発生しました';
-    console.error(err);
-    alert('読み取りに失敗しました。別の画像でお試しください。tesseract/とtessdata/フォルダが正しく配置されているか確認してください。');
-  }
-}
-
-function parseAndRender(rawText){
-  rawBox.textContent = rawText;
-
+// 1枚分のOCRテキストから行を抽出するだけ(グローバル状態には触れない)
+function parseRows(rawText){
   // 行ごとに「数字 = 因数×因数×… (空白) N pt」のパターンを抽出
   // ×, x, X いずれの掛け算記号にも対応。pt / Pt / PT に対応。
   const lineRegex = /(\d{1,6})\s*=\s*((?:\d+\s*[×xX*]\s*)*\d+)\s+(\d{1,4})\s*[pP][tT]/g;
 
-  parsedRows = [];
+  const rows = [];
   let match;
   while((match = lineRegex.exec(rawText)) !== null){
     const number = match[1];
     const factorsRaw = match[2];
     const points = match[3];
     const factors = factorsRaw.split(/[×xX*]/).map(s=>s.trim()).filter(Boolean);
-    parsedRows.push({ number, factors, points });
+    const { score, bonusApplied, hasUnknown } = computeScore(factors);
+    const mismatch = !hasUnknown && score !== parseInt(points, 10);
+    rows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, mismatch });
   }
+  return rows;
+}
 
+// 抽出した行を、既存のparsedRowsに追加する(上書きしない = 複数枚分が積み上がる)
+function addRows(rows){
+  rows.forEach(r=>{
+    r.id = parsedRows.length; // 表示・チェック状態管理用の一意なID
+    parsedRows.push(r);
+  });
+}
+
+// AND検索: スペース区切りの各数字が、その「出現回数」以上含まれているかを見る
+// 例: "11 11" と入力 → 素因数に11が2個以上含まれる行だけがヒット
+function passesFilters(row){
+  if(filters.factorTerms.length){
+    const need = {};
+    filters.factorTerms.forEach(t => { need[t] = (need[t]||0) + 1; });
+    const have = {};
+    row.factors.forEach(f => { have[f] = (have[f]||0) + 1; });
+    for(const t in need){
+      if((have[t]||0) < need[t]) return false;
+    }
+  }
+  const pt = parseInt(row.points, 10);
+  if(filters.pointsMin !== null && pt < filters.pointsMin) return false;
+  if(filters.pointsMax !== null && pt > filters.pointsMax) return false;
+  if(filters.mismatchOnly && !row.mismatch) return false;
+  return true;
+}
+
+function renderTable(){
+  const visible = parsedRows.filter(passesFilters);
   tbody.innerHTML = '';
   if(parsedRows.length === 0){
     emptyNote.style.display = 'block';
   } else {
     emptyNote.style.display = 'none';
-    parsedRows.forEach(row=>{
+    visible.forEach(row=>{
       const tr = document.createElement('tr');
+      if(row.mismatch) tr.classList.add('mismatch');
+      if(checkedIds.has(row.id)) tr.classList.add('checked');
+      let calcCell;
+      if(row.hasUnknown){
+        calcCell = `<td class="calc unknown">範囲外</td>`;
+      } else if(row.mismatch){
+        calcCell = `<td class="calc bad">⚠ ${row.computed}pt</td>`;
+      } else {
+        calcCell = `<td class="calc ok">${row.computed}pt${row.bonusApplied ? ' (×1.5)' : ''}</td>`;
+      }
       tr.innerHTML = `
+        <td class="chk-col"><input type="checkbox" class="row-chk" data-id="${row.id}" ${checkedIds.has(row.id) ? 'checked' : ''}></td>
         <td class="num">${row.number}</td>
         <td class="factors">${row.factors.join(' × ')}</td>
         <td class="pt">${row.points}pt</td>
+        ${calcCell}
       `;
       tbody.appendChild(tr);
     });
   }
-  countEl.textContent = `${parsedRows.length}件`;
-  results.classList.add('show');
+  countEl.textContent = parsedRows.length === visible.length
+    ? `${parsedRows.length}件`
+    : `${visible.length}件 / 全${parsedRows.length}件`;
 }
+
+// チェックボックスはtbodyへのイベント委譲で処理(再描画のたびに個別登録しない)
+tbody.addEventListener('change', e=>{
+  if(!e.target.classList.contains('row-chk')) return;
+  const id = Number(e.target.dataset.id);
+  if(e.target.checked) checkedIds.add(id); else checkedIds.delete(id);
+  e.target.closest('tr').classList.toggle('checked', e.target.checked);
+});
 
 rawToggle.addEventListener('click', ()=>{
   const showing = rawBox.classList.toggle('show');
   rawToggle.textContent = (showing ? '▾' : '▸') + ' 認識テキストを表示(デバッグ用)';
 });
 
+scoreNote.addEventListener('click', ()=>{
+  const showing = scoreTable.classList.toggle('show');
+  scoreNote.textContent = (showing ? '▾' : '▸') + ' 検算に使っている得点表を表示';
+});
+
+filterFactor.addEventListener('input', ()=>{
+  filters.factorTerms = filterFactor.value.trim().split(/\s+/).filter(Boolean);
+  renderTable();
+});
+filterPointsMin.addEventListener('input', ()=>{
+  const v = filterPointsMin.value.trim();
+  filters.pointsMin = v === '' ? null : parseInt(v, 10);
+  renderTable();
+});
+filterPointsMax.addEventListener('input', ()=>{
+  const v = filterPointsMax.value.trim();
+  filters.pointsMax = v === '' ? null : parseInt(v, 10);
+  renderTable();
+});
+filterMismatch.addEventListener('change', ()=>{
+  filters.mismatchOnly = filterMismatch.checked;
+  renderTable();
+});
+filterClear.addEventListener('click', ()=>{
+  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+  filterFactor.value = '';
+  filterPointsMin.value = '';
+  filterPointsMax.value = '';
+  filterMismatch.checked = false;
+  renderTable();
+});
+
 dlCsv.addEventListener('click', ()=>{
   if(parsedRows.length === 0) return;
-  let csv = '数字,素因数分解,得点\n';
-  parsedRows.forEach(r=>{
-    csv += `${r.number},"${r.factors.join('×')}",${r.points}\n`;
+  const visible = parsedRows.filter(passesFilters);
+  let csv = '数字,素因数分解,得点(OCR),検算,判定,チェック\n';
+  visible.forEach(r=>{
+    const calc = r.hasUnknown ? '範囲外' : r.computed;
+    const verdict = r.hasUnknown ? '-' : (r.mismatch ? '不一致' : '一致');
+    const checked = checkedIds.has(r.id) ? '済' : '未';
+    csv += `${r.number},"${r.factors.join('×')}",${r.points},${calc},${verdict},${checked}\n`;
   });
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -444,11 +677,24 @@ dlCsv.addEventListener('click', ()=>{
 });
 
 resetBtn.addEventListener('click', ()=>{
+  if(parsedRows.length > 0 && !confirm('これまで蓄積したスキャン結果をすべて消去します。よろしいですか?')) return;
+  parsedRows = [];
+  checkedIds = new Set();
+  allRawText = '';
   fileInput.value = '';
-  preview.style.display = 'none';
+  previewStrip.innerHTML = '';
+  previewStrip.classList.remove('show');
   results.classList.remove('show');
+  rawBox.textContent = '';
   rawBox.classList.remove('show');
   rawToggle.textContent = '▸ 認識テキストを表示(デバッグ用)';
+  scoreTable.classList.remove('show');
+  scoreNote.textContent = '▸ 検算に使っている得点表を表示';
+  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+  filterFactor.value = '';
+  filterPointsMin.value = '';
+  filterPointsMax.value = '';
+  filterMismatch.checked = false;
 });
 </script>
 </body>
