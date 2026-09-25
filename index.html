@@ -137,65 +137,9 @@
   }
   tbody tr:last-child td{border-bottom:none;}
   tbody tr:hover{background:var(--panel-hover);}
-  tbody tr.mismatch{background:rgba(255,107,107,0.08);}
-  tbody tr.mismatch:hover{background:rgba(255,107,107,0.14);}
   td.num{color:var(--text);font-weight:600;}
   td.pt{color:var(--accent);text-align:right;}
   td.factors{color:var(--muted);}
-  td.calc{text-align:right;}
-  td.calc.ok{color:var(--ok);}
-  td.calc.bad{color:#ff6b6b;font-weight:700;}
-  td.calc.unknown{color:var(--muted);font-style:italic;}
-  th.chk-col, td.chk-col{width:32px;padding-left:14px;padding-right:0;}
-  td.chk-col input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
-  tbody tr.checked td{opacity:.5;}
-  tbody tr.checked td.num{text-decoration:line-through;}
-
-  .filter-bar{
-    display:flex;gap:8px;flex-wrap:wrap;
-    align-items:center;
-    margin-bottom:12px;
-  }
-  .filter-bar input[type="text"]{
-    font-family:var(--mono);
-    font-size:12.5px;
-    background:var(--panel);
-    border:1px solid var(--border);
-    color:var(--text);
-    padding:8px 10px;
-    border-radius:8px;
-    width:160px;
-  }
-  .filter-bar input.pt-range{width:70px;}
-  .filter-bar .range-sep{color:var(--muted);font-family:var(--mono);font-size:12px;}
-  .filter-bar input[type="text"]::placeholder{color:var(--muted);}
-  .filter-bar input[type="text"]:focus{outline:none;border-color:var(--accent);}
-  .filter-bar .chk{
-    display:flex;align-items:center;gap:6px;
-    font-family:var(--mono);font-size:12px;color:var(--muted);
-    cursor:pointer;
-  }
-  .filter-bar .chk input{cursor:pointer;}
-  .filter-clear{
-    font-family:var(--mono);font-size:12px;color:var(--muted);
-    background:none;border:1px solid var(--border);
-    border-radius:8px;padding:8px 10px;cursor:pointer;
-  }
-  .filter-clear:hover{color:var(--text);border-color:var(--muted);}
-
-  .score-note{
-    margin-bottom:12px;font-size:11.5px;color:var(--muted);
-    cursor:pointer;font-family:var(--mono);user-select:none;
-  }
-  .score-note:hover{color:var(--text);}
-  .score-table{
-    display:none;margin:8px 0 14px;
-    background:var(--panel);border:1px solid var(--border);
-    border-radius:8px;padding:10px 14px;
-    font-family:var(--mono);font-size:11px;color:var(--muted);
-    line-height:1.9;
-  }
-  .score-table.show{display:block;}
 
   .raw-toggle{
     margin-top:18px;
@@ -297,28 +241,9 @@
       <h2>読み取り結果</h2>
       <span class="count" id="count">0件</span>
     </div>
-
-    <div class="score-note" id="scoreNote">▸ 検算に使っている得点表を表示</div>
-    <div class="score-table" id="scoreTable">
-      2 → 3pt / 5 → 4pt / 3 → 5pt / 7 → 6pt<br>
-      11〜19 → 9pt / 23〜47 → 12pt / 53〜97 → 15pt<br>
-      101〜163 → 18pt / 167〜251 → 21pt / 257〜367 → 24pt / 373〜499 → 27pt<br>
-      ボーナス: 2桁の素因数が2つ以上含まれる → 合計×1.5(小数点以下切り捨て)<br>
-      ※500以上の素因数は対応表に無いため「範囲外」と表示されます
-    </div>
-
-    <div class="filter-bar">
-      <input type="text" id="filterFactor" placeholder="素因数AND検索 (例: 11 29)">
-      <input type="text" class="pt-range" id="filterPointsMin" placeholder="得点 最小">
-      <span class="range-sep">〜</span>
-      <input type="text" class="pt-range" id="filterPointsMax" placeholder="最大">
-      <label class="chk"><input type="checkbox" id="filterMismatch"> 検算が不一致のみ表示</label>
-      <button class="filter-clear" id="filterClear">フィルター解除</button>
-    </div>
-
     <table id="table">
       <thead>
-        <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th></tr>
+        <tr><th>数字</th><th>素因数分解</th><th>得点</th></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -385,54 +310,8 @@ const rawToggle = document.getElementById('rawToggle');
 const rawBox = document.getElementById('rawBox');
 const dlCsv = document.getElementById('dlCsv');
 const resetBtn = document.getElementById('resetBtn');
-const scoreNote = document.getElementById('scoreNote');
-const scoreTable = document.getElementById('scoreTable');
-const filterFactor = document.getElementById('filterFactor');
-const filterPointsMin = document.getElementById('filterPointsMin');
-const filterPointsMax = document.getElementById('filterPointsMax');
-const filterMismatch = document.getElementById('filterMismatch');
-const filterClear = document.getElementById('filterClear');
 
 let parsedRows = [];
-let checkedIds = new Set();
-let filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
-
-// ── 得点表(スクリーンショットの「参考データ」に基づく) ──
-const POINT_RULES = [
-  { min: 2,   max: 2,   pt: 3  },
-  { min: 3,   max: 3,   pt: 5  },
-  { min: 5,   max: 5,   pt: 4  },
-  { min: 7,   max: 7,   pt: 6  },
-  { min: 11,  max: 19,  pt: 9  },
-  { min: 23,  max: 47,  pt: 12 },
-  { min: 53,  max: 97,  pt: 15 },
-  { min: 101, max: 163, pt: 18 },
-  { min: 167, max: 251, pt: 21 },
-  { min: 257, max: 367, pt: 24 },
-  { min: 373, max: 499, pt: 27 },
-];
-
-function pointForFactor(n){
-  const rule = POINT_RULES.find(r => n >= r.min && n <= r.max);
-  return rule ? rule.pt : null; // null = 対応表の範囲外(500以上など)
-}
-
-// 素因数リストから得点を検算する。
-// ボーナス条件:「2桁の素因数が2つ含まれる」→ 同じ数の重複も1個ずつ数える(例: 11×11は2個)
-function computeScore(factors){
-  const nums = factors.map(f => parseInt(f, 10));
-  let sum = 0;
-  let hasUnknown = false;
-  nums.forEach(n=>{
-    const pt = pointForFactor(n);
-    if(pt === null) hasUnknown = true;
-    else sum += pt;
-  });
-  const twoDigitCount = nums.filter(n => n >= 10 && n <= 99).length;
-  const bonusApplied = twoDigitCount >= 2;
-  if(bonusApplied) sum = Math.floor(sum * 1.5);
-  return { score: sum, bonusApplied, hasUnknown };
-}
 
 ['dragover','dragenter'].forEach(evt=>{
   dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.add('drag');});
@@ -522,52 +401,26 @@ function parseAndRender(rawText){
     const factorsRaw = match[2];
     const points = match[3];
     const factors = factorsRaw.split(/[×xX*]/).map(s=>s.trim()).filter(Boolean);
-    const { score, bonusApplied, hasUnknown } = computeScore(factors);
-    const mismatch = !hasUnknown && score !== parseInt(points, 10);
-    parsedRows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, mismatch });
+    parsedRows.push({ number, factors, points });
   }
 
-  renderTable();
-  results.classList.add('show');
-}
-
-function passesFilters(row){
-  if(filters.factor && !row.factors.includes(filters.factor)) return false;
-  if(filters.points && row.points !== filters.points) return false;
-  if(filters.mismatchOnly && !row.mismatch) return false;
-  return true;
-}
-
-function renderTable(){
-  const visible = parsedRows.filter(passesFilters);
   tbody.innerHTML = '';
   if(parsedRows.length === 0){
     emptyNote.style.display = 'block';
   } else {
     emptyNote.style.display = 'none';
-    visible.forEach(row=>{
+    parsedRows.forEach(row=>{
       const tr = document.createElement('tr');
-      if(row.mismatch) tr.classList.add('mismatch');
-      let calcCell;
-      if(row.hasUnknown){
-        calcCell = `<td class="calc unknown">範囲外</td>`;
-      } else if(row.mismatch){
-        calcCell = `<td class="calc bad">⚠ ${row.computed}pt</td>`;
-      } else {
-        calcCell = `<td class="calc ok">${row.computed}pt${row.bonusApplied ? ' (×1.5)' : ''}</td>`;
-      }
       tr.innerHTML = `
         <td class="num">${row.number}</td>
         <td class="factors">${row.factors.join(' × ')}</td>
         <td class="pt">${row.points}pt</td>
-        ${calcCell}
       `;
       tbody.appendChild(tr);
     });
   }
-  countEl.textContent = parsedRows.length === visible.length
-    ? `${parsedRows.length}件`
-    : `${visible.length}件 / 全${parsedRows.length}件`;
+  countEl.textContent = `${parsedRows.length}件`;
+  results.classList.add('show');
 }
 
 rawToggle.addEventListener('click', ()=>{
@@ -575,39 +428,11 @@ rawToggle.addEventListener('click', ()=>{
   rawToggle.textContent = (showing ? '▾' : '▸') + ' 認識テキストを表示(デバッグ用)';
 });
 
-scoreNote.addEventListener('click', ()=>{
-  const showing = scoreTable.classList.toggle('show');
-  scoreNote.textContent = (showing ? '▾' : '▸') + ' 検算に使っている得点表を表示';
-});
-
-filterFactor.addEventListener('input', ()=>{
-  filters.factor = filterFactor.value.trim();
-  renderTable();
-});
-filterPoints.addEventListener('input', ()=>{
-  filters.points = filterPoints.value.trim();
-  renderTable();
-});
-filterMismatch.addEventListener('change', ()=>{
-  filters.mismatchOnly = filterMismatch.checked;
-  renderTable();
-});
-filterClear.addEventListener('click', ()=>{
-  filters = { factor: '', points: '', mismatchOnly: false };
-  filterFactor.value = '';
-  filterPoints.value = '';
-  filterMismatch.checked = false;
-  renderTable();
-});
-
 dlCsv.addEventListener('click', ()=>{
   if(parsedRows.length === 0) return;
-  const visible = parsedRows.filter(passesFilters);
-  let csv = '数字,素因数分解,得点(OCR),検算,判定\n';
-  visible.forEach(r=>{
-    const calc = r.hasUnknown ? '範囲外' : r.computed;
-    const verdict = r.hasUnknown ? '-' : (r.mismatch ? '不一致' : '一致');
-    csv += `${r.number},"${r.factors.join('×')}",${r.points},${calc},${verdict}\n`;
+  let csv = '数字,素因数分解,得点\n';
+  parsedRows.forEach(r=>{
+    csv += `${r.number},"${r.factors.join('×')}",${r.points}\n`;
   });
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -624,12 +449,6 @@ resetBtn.addEventListener('click', ()=>{
   results.classList.remove('show');
   rawBox.classList.remove('show');
   rawToggle.textContent = '▸ 認識テキストを表示(デバッグ用)';
-  scoreTable.classList.remove('show');
-  scoreNote.textContent = '▸ 検算に使っている得点表を表示';
-  filters = { factor: '', points: '', mismatchOnly: false };
-  filterFactor.value = '';
-  filterPoints.value = '';
-  filterMismatch.checked = false;
 });
 </script>
 </body>
