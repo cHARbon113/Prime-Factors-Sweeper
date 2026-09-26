@@ -241,6 +241,12 @@
     cursor:pointer;
   }
   .filter-bar .chk input{cursor:pointer;}
+  .filter-apply{
+    font-family:var(--mono);font-size:12px;font-weight:700;
+    color:#1a1200;background:var(--accent);
+    border:none;border-radius:8px;padding:8px 12px;cursor:pointer;
+  }
+  .filter-apply:hover{filter:brightness(1.08);}
   .filter-clear{
     font-family:var(--mono);font-size:12px;color:var(--muted);
     background:none;border:1px solid var(--border);
@@ -397,6 +403,7 @@
         <option value="unchecked">未チェックのみ</option>
       </select>
       <label class="chk"><input type="checkbox" id="filterMismatch"> 検算不一致のみ表示(得点・数値どちらも)</label>
+      <button class="filter-apply" id="filterApply">フィルター適用</button>
       <button class="filter-clear" id="filterClear">フィルター解除</button>
     </div>
 
@@ -479,6 +486,7 @@ const filterPointsMin = document.getElementById('filterPointsMin');
 const filterPointsMax = document.getElementById('filterPointsMax');
 const filterMismatch = document.getElementById('filterMismatch');
 const filterChecked = document.getElementById('filterChecked');
+const filterApply = document.getElementById('filterApply');
 const filterClear = document.getElementById('filterClear');
 
 let parsedRows = [];       // ページを再読み込みするまで、複数回のスキャン結果をここに蓄積し続ける
@@ -820,17 +828,13 @@ function renderTable(){
 }
 
 // チェックボックスの状態はchangeイベントで検知(クリックイベントとは別に登録)
+// ここでは表の再フィルタリングは行わない(フィルターは「フィルター適用」を押した時だけ反映する方針のため)。
+// これにより「未チェックのみ」を見ながらチェックを入れても、その場で行が消えることはない。
 tbody.addEventListener('change', e=>{
   if(!e.target.classList.contains('row-chk')) return;
   const id = Number(e.target.dataset.id);
   if(e.target.checked) checkedIds.add(id); else checkedIds.delete(id);
-  if(filters.checkedState === 'all'){
-    // フィルター無効時は行が消えないので、軽い見た目の切り替えだけで十分
-    e.target.closest('tr').classList.toggle('checked', e.target.checked);
-  } else {
-    // チェック状態でフィルター中は、チェックを変えるとその行自体が表示/非表示になるため再描画する
-    renderTable();
-  }
+  e.target.closest('tr').classList.toggle('checked', e.target.checked);
   showSaveNote(persistState(), 0);
 });
 
@@ -907,28 +911,29 @@ scoreNote.addEventListener('click', ()=>{
   scoreNote.textContent = (showing ? '▾' : '▸') + ' 検算に使っている得点表を表示';
 });
 
-filterFactor.addEventListener('input', ()=>{
+// フィルターは入力するたびには反映せず、「フィルター適用」を押した時(またはEnterキー)にだけ反映する。
+// これにより、「未チェックのみ」を見ながらチェックを入れても、次にフィルターを掛け直すまでは
+// その場に留まるようにしている(チェックした瞬間に行が消えて操作しづらい、という問題への対応)。
+function applyFilters(){
   filters.factorTerms = filterFactor.value.trim().split(/\s+/).filter(Boolean);
-  renderTable();
-});
-filterPointsMin.addEventListener('input', ()=>{
-  const v = filterPointsMin.value.trim();
-  filters.pointsMin = v === '' ? null : parseInt(v, 10);
-  renderTable();
-});
-filterPointsMax.addEventListener('input', ()=>{
-  const v = filterPointsMax.value.trim();
-  filters.pointsMax = v === '' ? null : parseInt(v, 10);
-  renderTable();
-});
-filterMismatch.addEventListener('change', ()=>{
+  const minV = filterPointsMin.value.trim();
+  filters.pointsMin = minV === '' ? null : parseInt(minV, 10);
+  const maxV = filterPointsMax.value.trim();
+  filters.pointsMax = maxV === '' ? null : parseInt(maxV, 10);
   filters.mismatchOnly = filterMismatch.checked;
-  renderTable();
-});
-filterChecked.addEventListener('change', ()=>{
   filters.checkedState = filterChecked.value;
   renderTable();
+}
+
+filterApply.addEventListener('click', applyFilters);
+
+// テキスト入力欄はEnterキーでも適用できるようにする
+[filterFactor, filterPointsMin, filterPointsMax].forEach(el=>{
+  el.addEventListener('keydown', e=>{
+    if(e.key === 'Enter') applyFilters();
+  });
 });
+
 filterClear.addEventListener('click', ()=>{
   filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false, checkedState: 'all' };
   filterFactor.value = '';
