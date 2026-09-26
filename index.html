@@ -140,6 +140,12 @@
     overflow:hidden;
     border:1px solid var(--border);
   }
+  .table-scroll{
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    border-radius:10px;
+  }
+  .table-scroll table{min-width:560px;} /* 狭い画面では横スクロールさせ、列を潰しすぎない */
   thead th{
     text-align:left;
     padding:10px 14px;
@@ -160,15 +166,15 @@
   tbody tr.mismatch{background:rgba(255,107,107,0.08);}
   tbody tr.mismatch:hover{background:rgba(255,107,107,0.14);}
   td.num{color:var(--text);font-weight:600;}
-  td.num .num-bad{color:#ff6b6b;margin-left:4px;cursor:help;}
+  td.num .num-bad{color:#ff6b6b;margin-left:6px;font-size:11px;font-weight:600;white-space:nowrap;}
   td.pt{color:var(--accent);text-align:right;}
   td.factors{color:var(--muted);}
   td.calc{text-align:right;}
   td.calc.ok{color:var(--ok);}
   td.calc.bad{color:#ff6b6b;font-weight:700;}
   td.calc.unknown{color:var(--muted);font-style:italic;}
-  th.chk-col, td.chk-col{width:32px;padding-left:14px;padding-right:0;}
-  td.chk-col input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
+  th.chk-col, td.chk-col{width:44px;padding:9px 8px 9px 14px;}
+  td.chk-col input{width:20px;height:20px;cursor:pointer;accent-color:var(--accent);}
   tbody tr.checked td{opacity:.5;}
   tbody tr.checked td.num{text-decoration:line-through;}
   tbody tr.edited{box-shadow:inset 3px 0 0 var(--accent);}
@@ -176,10 +182,11 @@
 
   th.op-col, td.op-col{width:1%;white-space:nowrap;text-align:right;}
   button.edit-btn, button.save-btn, button.cancel-btn{
-    font-family:var(--mono);font-size:11px;
+    font-family:var(--mono);font-size:12px;
     background:none;border:1px solid var(--border);
     color:var(--muted);border-radius:6px;
-    padding:4px 8px;cursor:pointer;
+    padding:8px 12px;cursor:pointer;
+    min-height:36px; /* スマホでも指で押しやすい高さを確保 */
   }
   button.edit-btn:hover{color:var(--text);border-color:var(--muted);}
   button.save-btn{color:var(--ok);border-color:var(--ok);margin-right:4px;}
@@ -214,6 +221,17 @@
     width:160px;
   }
   .filter-bar input.pt-range{width:70px;}
+  .filter-bar select{
+    font-family:var(--mono);
+    font-size:12.5px;
+    background:var(--panel);
+    border:1px solid var(--border);
+    color:var(--text);
+    padding:8px 10px;
+    border-radius:8px;
+    cursor:pointer;
+  }
+  .filter-bar select:focus{outline:none;border-color:var(--accent);}
   .filter-bar .range-sep{color:var(--muted);font-family:var(--mono);font-size:12px;}
   .filter-bar input[type="text"]::placeholder{color:var(--muted);}
   .filter-bar input[type="text"]:focus{outline:none;border-color:var(--accent);}
@@ -229,6 +247,11 @@
     border-radius:8px;padding:8px 10px;cursor:pointer;
   }
   .filter-clear:hover{color:var(--text);border-color:var(--muted);}
+
+  @media (max-width: 480px){
+    .filter-bar input[type="text"], .filter-bar select{width:100%;}
+    .filter-bar input.pt-range{width:auto;flex:1;}
+  }
 
   .score-note{
     margin-bottom:12px;font-size:11.5px;color:var(--muted);
@@ -365,19 +388,26 @@
 
     <div class="filter-bar">
       <input type="text" id="filterFactor" placeholder="素因数AND検索 (例: 11 29)">
-      <input type="text" class="pt-range" id="filterPointsMin" placeholder="得点 最小">
+      <input type="text" class="pt-range" id="filterPointsMin" placeholder="得点 最小" inputmode="numeric">
       <span class="range-sep">〜</span>
-      <input type="text" class="pt-range" id="filterPointsMax" placeholder="最大">
+      <input type="text" class="pt-range" id="filterPointsMax" placeholder="最大" inputmode="numeric">
+      <select id="filterChecked">
+        <option value="all">チェック: すべて</option>
+        <option value="checked">チェック済みのみ</option>
+        <option value="unchecked">未チェックのみ</option>
+      </select>
       <label class="chk"><input type="checkbox" id="filterMismatch"> 検算不一致のみ表示(得点・数値どちらも)</label>
       <button class="filter-clear" id="filterClear">フィルター解除</button>
     </div>
 
-    <table id="table">
-      <thead>
-        <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th><th class="op-col"></th></tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table id="table">
+        <thead>
+          <tr><th class="chk-col"></th><th>数字</th><th>素因数分解</th><th>得点(OCR)</th><th>検算</th><th class="op-col"></th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
 
     <div class="empty-note" id="emptyNote" style="display:none;">
       パターンに一致する行が見つかりませんでした。下の「認識テキスト」を確認して、画像の解像度を上げるか、別の画像でお試しください。
@@ -448,13 +478,14 @@ const filterFactor = document.getElementById('filterFactor');
 const filterPointsMin = document.getElementById('filterPointsMin');
 const filterPointsMax = document.getElementById('filterPointsMax');
 const filterMismatch = document.getElementById('filterMismatch');
+const filterChecked = document.getElementById('filterChecked');
 const filterClear = document.getElementById('filterClear');
 
 let parsedRows = [];       // ページを再読み込みするまで、複数回のスキャン結果をここに蓄積し続ける
 let checkedIds = new Set();
 let allRawText = '';
 let editingId = null;      // 現在インライン編集中の行のid(nullなら編集中なし)
-let filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+let filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false, checkedState: 'all' };
 
 // ── 得点表(スクリーンショットの「参考データ」に基づく) ──
 const POINT_RULES = [
@@ -729,6 +760,8 @@ function passesFilters(row){
   if(filters.pointsMin !== null && pt < filters.pointsMin) return false;
   if(filters.pointsMax !== null && pt > filters.pointsMax) return false;
   if(filters.mismatchOnly && !row.mismatch && !row.numberMismatch) return false;
+  if(filters.checkedState === 'checked' && !checkedIds.has(row.id)) return false;
+  if(filters.checkedState === 'unchecked' && checkedIds.has(row.id)) return false;
   return true;
 }
 
@@ -749,9 +782,9 @@ function renderTable(){
         tr.classList.add('editing');
         tr.innerHTML = `
           <td class="chk-col"></td>
-          <td class="num"><input type="text" class="edit-num" value="${row.number}"></td>
+          <td class="num"><input type="text" class="edit-num" value="${row.number}" inputmode="numeric"></td>
           <td class="factors"><input type="text" class="edit-factors" value="${row.factors.join('×')}"></td>
-          <td class="pt"><input type="text" class="edit-points" value="${row.points}"></td>
+          <td class="pt"><input type="text" class="edit-points" value="${row.points}" inputmode="numeric"></td>
           <td class="calc-pending">保存後に再計算</td>
           <td class="op-col">
             <button class="save-btn" data-id="${row.id}">保存</button>
@@ -772,7 +805,7 @@ function renderTable(){
       }
       tr.innerHTML = `
         <td class="chk-col"><input type="checkbox" class="row-chk" data-id="${row.id}" ${checkedIds.has(row.id) ? 'checked' : ''}></td>
-        <td class="num">${row.number}${row.numberMismatch ? `<span class="num-bad" title="素因数の積(${computeProduct(row.factors)})が数字と一致しません">⚠</span>` : ''}${row.edited ? '<span class="edited-mark">✎</span>' : ''}</td>
+        <td class="num">${row.number}${row.numberMismatch ? `<span class="num-bad">⚠積:${computeProduct(row.factors)}</span>` : ''}${row.edited ? '<span class="edited-mark">✎</span>' : ''}</td>
         <td class="factors">${row.factors.join(' × ')}</td>
         <td class="pt">${row.points}pt</td>
         ${calcCell}
@@ -791,7 +824,13 @@ tbody.addEventListener('change', e=>{
   if(!e.target.classList.contains('row-chk')) return;
   const id = Number(e.target.dataset.id);
   if(e.target.checked) checkedIds.add(id); else checkedIds.delete(id);
-  e.target.closest('tr').classList.toggle('checked', e.target.checked);
+  if(filters.checkedState === 'all'){
+    // フィルター無効時は行が消えないので、軽い見た目の切り替えだけで十分
+    e.target.closest('tr').classList.toggle('checked', e.target.checked);
+  } else {
+    // チェック状態でフィルター中は、チェックを変えるとその行自体が表示/非表示になるため再描画する
+    renderTable();
+  }
   showSaveNote(persistState(), 0);
 });
 
@@ -886,12 +925,17 @@ filterMismatch.addEventListener('change', ()=>{
   filters.mismatchOnly = filterMismatch.checked;
   renderTable();
 });
+filterChecked.addEventListener('change', ()=>{
+  filters.checkedState = filterChecked.value;
+  renderTable();
+});
 filterClear.addEventListener('click', ()=>{
-  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false, checkedState: 'all' };
   filterFactor.value = '';
   filterPointsMin.value = '';
   filterPointsMax.value = '';
   filterMismatch.checked = false;
+  filterChecked.value = 'all';
   renderTable();
 });
 
@@ -931,11 +975,12 @@ resetBtn.addEventListener('click', ()=>{
   rawToggle.textContent = '▸ 認識テキストを表示(デバッグ用)';
   scoreTable.classList.remove('show');
   scoreNote.textContent = '▸ 検算に使っている得点表を表示';
-  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false };
+  filters = { factorTerms: [], pointsMin: null, pointsMax: null, mismatchOnly: false, checkedState: 'all' };
   filterFactor.value = '';
   filterPointsMin.value = '';
   filterPointsMax.value = '';
   filterMismatch.checked = false;
+  filterChecked.value = 'all';
   localStorage.removeItem(STORAGE_KEY);
   saveNote.classList.remove('show');
 });
