@@ -118,6 +118,18 @@
   .results-head h2{font-size:15px;margin:0;font-weight:600;}
   .count{font-family:var(--mono);font-size:12px;color:var(--muted);}
 
+  .save-note{
+    display:none;
+    font-family:var(--mono);font-size:11.5px;
+    background:rgba(255,180,84,0.1);
+    border:1px solid var(--accent-dim);
+    color:var(--accent);
+    border-radius:8px;
+    padding:8px 12px;
+    margin-bottom:12px;
+  }
+  .save-note.show{display:block;}
+
   table{
     width:100%;
     border-collapse:collapse;
@@ -331,13 +343,23 @@
       <span class="count" id="count">0件</span>
     </div>
 
+    <div class="save-note" id="saveNote"></div>
+
     <div class="score-note" id="scoreNote">▸ 検算に使っている得点表を表示</div>
     <div class="score-table" id="scoreTable">
       2 → 3pt / 5 → 4pt / 3 → 5pt / 7 → 6pt<br>
       11〜19 → 9pt / 23〜47 → 12pt / 53〜97 → 15pt<br>
       101〜163 → 18pt / 167〜251 → 21pt / 257〜367 → 24pt / 373〜499 → 27pt<br>
-      ボーナス: 2桁の素因数が2つ以上含まれる → 合計×1.5(小数点以下切り捨て)<br>
-      ※500以上の素因数は対応表に無いため「範囲外」と表示されます<br>
+      503〜659 → 29pt / 661〜857 → 31pt / 859〜1063 → 33pt / 1069〜1303 → 34pt<br>
+      1307〜1583 → 35pt / 1597〜1889 → 36pt / 1901〜2239 → 37pt / 2243〜2609 → 38pt<br>
+      2617〜2969 → 39pt / 2971〜3413 → 40pt / 3433〜3853 → 41pt / 3863〜4339 → 42pt<br>
+      4349〜4889 → 43pt / 4903〜4999 → 44pt<br>
+      ボーナス(最も倍率の高いものを1つだけ適用):<br>
+      ・2桁の素因数が2個 → ×1.5<br>
+      ・2桁の素因数が3個以上 → ×2.5 ※「4個以上」の明記なしのため3個以上を一律2.5倍として扱っています<br>
+      ・2桁と3桁の素因数が両方含まれる(個数不問) → ×2.5<br>
+      (小数点以下は切り捨て)<br>
+      ※4999より大きい素因数は対応表に無いため「範囲外」と表示されます<br>
       ※数字の横の⚠は「素因数の積が数字と一致しない」ことを示します(得点とは別の検算です)
     </div>
 
@@ -414,6 +436,7 @@ const barFill = document.getElementById('barFill');
 const results = document.getElementById('results');
 const tbody = document.getElementById('tbody');
 const countEl = document.getElementById('count');
+const saveNote = document.getElementById('saveNote');
 const emptyNote = document.getElementById('emptyNote');
 const rawToggle = document.getElementById('rawToggle');
 const rawBox = document.getElementById('rawBox');
@@ -446,15 +469,33 @@ const POINT_RULES = [
   { min: 167, max: 251, pt: 21 },
   { min: 257, max: 367, pt: 24 },
   { min: 373, max: 499, pt: 27 },
+  { min: 503, max: 659, pt: 29 },
+  { min: 661, max: 857, pt: 31 },
+  { min: 859, max: 1063, pt: 33 },
+  { min: 1069, max: 1303, pt: 34 },
+  { min: 1307, max: 1583, pt: 35 },
+  { min: 1597, max: 1889, pt: 36 },
+  { min: 1901, max: 2239, pt: 37 },
+  { min: 2243, max: 2609, pt: 38 },
+  { min: 2617, max: 2969, pt: 39 },
+  { min: 2971, max: 3413, pt: 40 },
+  { min: 3433, max: 3853, pt: 41 },
+  { min: 3863, max: 4339, pt: 42 },
+  { min: 4349, max: 4889, pt: 43 },
+  { min: 4903, max: 4999, pt: 44 },
 ];
 
 function pointForFactor(n){
   const rule = POINT_RULES.find(r => n >= r.min && n <= r.max);
-  return rule ? rule.pt : null; // null = 対応表の範囲外(500以上など)
+  return rule ? rule.pt : null; // null = 対応表の範囲外(5000以上など)
 }
 
 // 素因数リストから得点を検算する。
-// ボーナス条件:「2桁の素因数が2つ含まれる」→ 同じ数の重複も1個ずつ数える(例: 11×11は2個)
+// ボーナス条件(複数該当する場合は最も倍率の高いものを採用。掛け合わせはしない):
+//   ・2桁の素因数が2個              → ×1.5
+//   ・2桁の素因数が3個以上          → ×2.5 ※「4個以上」の指定はないため3個以上を一律2.5倍として扱う(要確認)
+//   ・2桁の素因数と3桁の素因数が両方含まれる(個数不問) → ×2.5
+// 同じ数の重複も1個ずつ数える(例: 11×11は「2桁が2個」)
 function computeScore(factors){
   const nums = factors.map(f => parseInt(f, 10));
   let sum = 0;
@@ -464,10 +505,24 @@ function computeScore(factors){
     if(pt === null) hasUnknown = true;
     else sum += pt;
   });
+
   const twoDigitCount = nums.filter(n => n >= 10 && n <= 99).length;
-  const bonusApplied = twoDigitCount >= 2;
-  if(bonusApplied) sum = Math.floor(sum * 1.5);
-  return { score: sum, bonusApplied, hasUnknown };
+  const hasTwoDigit = twoDigitCount >= 1;
+  const hasThreeDigit = nums.some(n => n >= 100 && n <= 999);
+
+  const candidates = [];
+  if(twoDigitCount >= 3) candidates.push({ mult: 2.5, label: '2桁が3個以上' });
+  else if(twoDigitCount === 2) candidates.push({ mult: 1.5, label: '2桁が2個' });
+  if(hasTwoDigit && hasThreeDigit) candidates.push({ mult: 2.5, label: '2桁+3桁を含む' });
+
+  let multiplier = 1, bonusLabel = null;
+  candidates.forEach(c=>{
+    if(c.mult > multiplier){ multiplier = c.mult; bonusLabel = c.label; }
+  });
+
+  const bonusApplied = multiplier > 1;
+  if(bonusApplied) sum = Math.floor(sum * multiplier);
+  return { score: sum, bonusApplied, hasUnknown, multiplier, bonusLabel };
 }
 
 // 素因数を全部掛け合わせて、元の数字と一致するかを確認する
@@ -488,8 +543,10 @@ function persistState(){
       checkedIds: Array.from(checkedIds),
       allRawText
     }));
+    return true;
   }catch(e){
     console.warn('localStorageへの保存に失敗しました(容量制限などの可能性)', e);
+    return false;
   }
 }
 
@@ -544,6 +601,7 @@ async function handleFiles(fileList){
 
   const thumbs = files.map(addThumb);
   statusEl.classList.add('show');
+  let totalSkipped = 0;
 
   for(let i=0; i<files.length; i++){
     const prefix = files.length > 1 ? `(${i+1}/${files.length}) ` : '';
@@ -555,7 +613,7 @@ async function handleFiles(fileList){
       const { data } = await w.recognize(files[i]);
       allRawText += (allRawText ? '\n\n--- 次の画像 ---\n\n' : '') + data.text;
       rawBox.textContent = allRawText;
-      addRows(parseRows(data.text));
+      totalSkipped += addRows(parseRows(data.text));
       thumbs[i].classList.remove('pending');
     }catch(err){
       console.error(err);
@@ -568,7 +626,20 @@ async function handleFiles(fileList){
   statusEl.classList.remove('show');
   renderTable();
   results.classList.add('show');
-  persistState();
+  const saved = persistState();
+  showSaveNote(saved, totalSkipped);
+}
+
+// 保存結果・重複スキップ件数を、画面上の小さな通知として一時的に表示する
+function showSaveNote(saved, skipped){
+  const parts = [];
+  if(skipped > 0) parts.push(`同じ数字の行が既にあったため ${skipped}件を重複スキップしました`);
+  if(!saved) parts.push('⚠ 自動保存に失敗しました(ブラウザのストレージ容量を超えている可能性があります)');
+  if(parts.length === 0) return;
+  saveNote.textContent = parts.join(' / ');
+  saveNote.classList.add('show');
+  clearTimeout(saveNote._timer);
+  saveNote._timer = setTimeout(()=> saveNote.classList.remove('show'), 8000);
 }
 
 // 今回読み取りたいのは「数字・× ・=・pt」のみ。
@@ -618,20 +689,28 @@ function parseRows(rawText){
     const factorsRaw = match[2];
     const points = match[3];
     const factors = factorsRaw.split(/[×xX*]/).map(s=>s.trim()).filter(Boolean);
-    const { score, bonusApplied, hasUnknown } = computeScore(factors);
+    const { score, bonusApplied, hasUnknown, multiplier } = computeScore(factors);
     const mismatch = !hasUnknown && score !== parseInt(points, 10);
     const numberMismatch = computeProduct(factors) !== parseInt(number, 10);
-    rows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, mismatch, numberMismatch });
+    rows.push({ number, factors, points, computed: score, bonusApplied, hasUnknown, multiplier, mismatch, numberMismatch });
   }
   return rows;
 }
 
 // 抽出した行を、既存のparsedRowsに追加する(上書きしない = 複数枚分が積み上がる)
+// 同じ「数字」がすでに存在する場合は追加しない(重複スキャン対策。既存の行が手動編集済みでも上書きされない)
 function addRows(rows){
+  let skipped = 0;
   rows.forEach(r=>{
+    const alreadyExists = parsedRows.some(existing => existing.number === r.number);
+    if(alreadyExists){
+      skipped++;
+      return;
+    }
     r.id = parsedRows.length; // 表示・チェック状態管理用の一意なID
     parsedRows.push(r);
   });
+  return skipped;
 }
 
 // AND検索: スペース区切りの各数字が、その「出現回数」以上含まれているかを見る
@@ -689,7 +768,7 @@ function renderTable(){
       } else if(row.mismatch){
         calcCell = `<td class="calc bad">⚠ ${row.computed}pt</td>`;
       } else {
-        calcCell = `<td class="calc ok">${row.computed}pt${row.bonusApplied ? ' (×1.5)' : ''}</td>`;
+        calcCell = `<td class="calc ok">${row.computed}pt${row.bonusApplied ? ` (×${row.multiplier})` : ''}</td>`;
       }
       tr.innerHTML = `
         <td class="chk-col"><input type="checkbox" class="row-chk" data-id="${row.id}" ${checkedIds.has(row.id) ? 'checked' : ''}></td>
@@ -713,7 +792,7 @@ tbody.addEventListener('change', e=>{
   const id = Number(e.target.dataset.id);
   if(e.target.checked) checkedIds.add(id); else checkedIds.delete(id);
   e.target.closest('tr').classList.toggle('checked', e.target.checked);
-  persistState();
+  showSaveNote(persistState(), 0);
 });
 
 // 編集/保存/キャンセルボタンは、すべてtbodyへのイベント委譲で処理する
@@ -762,20 +841,21 @@ function applyEdit(id, numVal, factorsVal, pointsVal){
   const row = parsedRows.find(r => r.id === id);
   if(!row) return;
 
-  const { score, bonusApplied, hasUnknown } = computeScore(factors);
+  const { score, bonusApplied, hasUnknown, multiplier } = computeScore(factors);
   row.number = numVal;
   row.factors = factors;
   row.points = pointsVal;
   row.computed = score;
   row.bonusApplied = bonusApplied;
   row.hasUnknown = hasUnknown;
+  row.multiplier = multiplier;
   row.mismatch = !hasUnknown && score !== parseInt(pointsVal, 10);
   row.numberMismatch = computeProduct(factors) !== parseInt(numVal, 10);
   row.edited = true;
 
   editingId = null;
   renderTable();
-  persistState();
+  showSaveNote(persistState(), 0);
 }
 
 rawToggle.addEventListener('click', ()=>{
@@ -857,6 +937,7 @@ resetBtn.addEventListener('click', ()=>{
   filterPointsMax.value = '';
   filterMismatch.checked = false;
   localStorage.removeItem(STORAGE_KEY);
+  saveNote.classList.remove('show');
 });
 
 // ページを開いた時点で、前回までの保存データがあれば復元する
